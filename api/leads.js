@@ -1,152 +1,218 @@
 // ============================================================
-// RFR CRM — Webhook Receiver
-// Roof & Fence Rejuvenation
+//  RFR CRM — Webhook Receiver + Email Notifications
+//  Roof & Fence Rejuvenation
 //
-// Environment variables required in Vercel:
-//   SUPABASE_URL
-//   SUPABASE_SERVICE_KEY
-//   RESEND_API_KEY
+//  Environment variables required in Vercel:
+//    SUPABASE_URL         — from Supabase project settings
+//    SUPABASE_SERVICE_KEY — service role key (NOT the anon key)
+//    RESEND_API_KEY       — from resend.com
 // ============================================================
 
 const { createClient } = require('@supabase/supabase-js');
 
-const NOTIFICATION_TO = 'ray@roofandfencerejuvenation.com';
-const NOTIFICATION_FROM = 'Roof & Fence Rejuvenation <onboarding@resend.dev>';
-
-function escapeHtml(value) {
-  if (value === null || value === undefined) return '';
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-function formatValue(value, fallback = '—') {
-  if (value === null || value === undefined || value === '') return fallback;
-  return escapeHtml(value);
-}
-
-function buildEmailHtml(body, lead, newId) {
-  const score = lead.qualification_score || 0;
-  const priority = lead.lead_priority || 'review';
-  const badge = priority === 'hot'
-    ? 'HOT LEAD'
-    : priority === 'low'
-      ? 'Low Priority'
-      : 'Needs Review';
-
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="font-family:Arial,sans-serif;background:#f5f7fa;margin:0;padding:20px">
-  <div style="max-width:640px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.1)">
-    <div style="background:#0b1f3a;padding:24px 28px;color:#fff">
-      <div style="font-size:13px;color:rgba(255,255,255,.7);margin-bottom:6px">Roof &amp; Fence Rejuvenation</div>
-      <div style="font-size:24px;font-weight:900;letter-spacing:-.02em">New Roof Lead — ${badge}</div>
-    </div>
-
-    <div style="padding:28px">
-      <h2 style="margin:0 0 14px;color:#0b1f3a;font-size:20px">Contact Info</h2>
-      <table style="width:100%;border-collapse:collapse;margin-bottom:22px">
-        <tr><td style="padding:8px 0;border-bottom:1px solid #edf1f6;color:#65758b;width:38%">Name</td><td style="padding:8px 0;border-bottom:1px solid #edf1f6;font-weight:700">${formatValue(lead.name)}</td></tr>
-        <tr><td style="padding:8px 0;border-bottom:1px solid #edf1f6;color:#65758b">Phone</td><td style="padding:8px 0;border-bottom:1px solid #edf1f6;font-weight:700"><a href="tel:${formatValue(lead.phone, '')}" style="color:#c62828">${formatValue(lead.phone)}</a></td></tr>
-        <tr><td style="padding:8px 0;border-bottom:1px solid #edf1f6;color:#65758b">Email</td><td style="padding:8px 0;border-bottom:1px solid #edf1f6">${formatValue(lead.email)}</td></tr>
-        <tr><td style="padding:8px 0;border-bottom:1px solid #edf1f6;color:#65758b">Best Time</td><td style="padding:8px 0;border-bottom:1px solid #edf1f6">${formatValue(lead.preferred_time)}</td></tr>
-        <tr><td style="padding:8px 0;color:#65758b">Address</td><td style="padding:8px 0">${formatValue(lead.address)}</td></tr>
-      </table>
-
-      <div style="background:#f5f7fa;border-radius:10px;padding:16px 18px;margin-bottom:22px">
-        <div style="font-weight:900;color:#0b1f3a;font-size:14px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.06em">Roof Details</div>
-        <table style="width:100%;border-collapse:collapse">
-          <tr><td style="padding:5px 0;color:#65758b;width:42%">Home Size</td><td style="padding:5px 0">${lead.home_sqft ? Number(lead.home_sqft).toLocaleString() + ' sq ft' : '—'} · ${lead.stories ? lead.stories + ' stories' : '—'}</td></tr>
-          <tr><td style="padding:5px 0;color:#65758b">Roof Style</td><td style="padding:5px 0">${formatValue(body.roofStyle || lead.roof_style)}</td></tr>
-          <tr><td style="padding:5px 0;color:#65758b">Sections</td><td style="padding:5px 0">${formatValue(body.roofSections || lead.roof_sections)}</td></tr>
-          <tr><td style="padding:5px 0;color:#65758b">Features</td><td style="padding:5px 0">${formatValue(body.roofFeatures || lead.roof_features, 'none')}</td></tr>
-          <tr><td style="padding:5px 0;color:#65758b">Age</td><td style="padding:5px 0">${formatValue(lead.roof_age)}</td></tr>
-          <tr><td style="padding:5px 0;color:#65758b">Condition</td><td style="padding:5px 0">${formatValue(lead.roof_condition)}</td></tr>
-          <tr><td style="padding:5px 0;color:#65758b">Pitch</td><td style="padding:5px 0">${formatValue(lead.roof_pitch)}</td></tr>
-          <tr><td style="padding:5px 0;color:#65758b">Known Issues</td><td style="padding:5px 0">${formatValue(lead.known_issues)}</td></tr>
-          <tr><td style="padding:5px 0;color:#65758b">Estimated Roof Area</td><td style="padding:5px 0">${lead.estimated_roof_area ? Number(lead.estimated_roof_area).toLocaleString() + ' sq ft' : '—'}</td></tr>
-        </table>
-      </div>
-
-      <div style="display:flex;gap:12px;margin-bottom:22px">
-        <div style="flex:1;background:#fff7f7;border:1px solid rgba(198,40,40,.2);border-radius:10px;padding:14px 16px">
-          <div style="font-size:11px;font-weight:800;color:#c62828;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Treatment Range</div>
-          <div style="font-size:20px;font-weight:900;color:#0b1f3a">${formatValue(lead.treatment_range)}</div>
-        </div>
-        <div style="flex:1;background:#f5f7fa;border:1px solid #dde3ed;border-radius:10px;padding:14px 16px">
-          <div style="font-size:11px;font-weight:800;color:#65758b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Score</div>
-          <div style="font-size:20px;font-weight:900;color:#0b1f3a">${score}/100</div>
-        </div>
-      </div>
-
-      ${lead.notes ? `<div style="background:#fffdf0;border:1px solid #e8e0a0;border-radius:10px;padding:14px 16px;margin-bottom:22px;color:#5a4f00"><strong>Customer notes:</strong> ${formatValue(lead.notes)}</div>` : ''}
-
-      <a href="https://rfr-crm.vercel.app" style="display:block;text-align:center;background:#c62828;color:#fff;text-decoration:none;padding:14px 24px;border-radius:999px;font-weight:900;font-size:15px">Open in CRM</a>
-    </div>
-
-    <div style="padding:16px 28px;background:#f5f7fa;font-size:11px;color:#9aafcc;text-align:center">
-      Roof &amp; Fence Rejuvenation · Lead ID: ${formatValue(newId, 'pending')}
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
-async function sendLeadEmail(body, lead, newId) {
-  if (!process.env.RESEND_API_KEY) {
-    console.log('RESEND_API_KEY missing. Email not sent.');
-    return;
-  }
-
-  const priority = lead.lead_priority || 'review';
-  const subject = priority === 'hot'
-    ? `Hot Lead - ${lead.name || 'New submission'} - ${lead.address || ''}`
-    : `New Roof Lead - ${lead.name || 'New submission'} - ${lead.address || ''}`;
-
-  const response = await fetch('https://api.resend.com/emails', {
+// ── Email sender via Resend ──────────────────────────────────
+async function sendEmail({ to, subject, html }) {
+  const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      from: NOTIFICATION_FROM,
-      to: [NOTIFICATION_TO],
+      from: 'Roof and Fence Rejuvenation <noreply@roofandfencerejuvenation.com>',
+      to,
       subject,
-      html: buildEmailHtml(body, lead, newId)
+      html
     })
   });
-
-  const responseText = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`Resend failed: ${response.status} ${responseText}`);
+  if (!res.ok) {
+    const err = await res.text();
+    console.error('Resend error:', err);
   }
-
-  console.log('Notification email sent for lead:', newId);
 }
 
+// ── Internal alert email to Ray ──────────────────────────────
+function buildInternalEmail(body, lead, newId) {
+  const priority = body.leadPriority || 'low';
+  const priorityColor = priority === 'hot' ? '#c62828' : priority === 'review' ? '#92400e' : '#374151';
+  const priorityBg    = priority === 'hot' ? '#fff0f0' : priority === 'review' ? '#fffbeb' : '#f3f4f6';
+
+  return `
+    <div style="font-family:Inter,ui-sans-serif,system-ui,sans-serif;max-width:580px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
+
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#0b1f3a,#132f55);padding:28px 32px;color:#fff">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.6);margin-bottom:6px">New Lead — Roof &amp; Fence Rejuvenation</div>
+        <div style="font-size:26px;font-weight:900;letter-spacing:-.03em">${body.name || 'Unknown'}</div>
+        <div style="margin-top:10px">
+          <span style="display:inline-block;padding:5px 12px;border-radius:999px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;background:${priorityBg};color:${priorityColor}">${priority.toUpperCase()} PRIORITY</span>
+        </div>
+      </div>
+
+      <!-- Contact -->
+      <div style="padding:24px 32px;border-bottom:1px solid #e2e8f0">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin-bottom:12px">Contact</div>
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px;width:120px">Phone</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px"><a href="tel:${body.phone}" style="color:#0b1f3a;text-decoration:none">${body.phone || '—'}</a></td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Email</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px"><a href="mailto:${body.email}" style="color:#0b1f3a;text-decoration:none">${body.email || '—'}</a></td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Best time</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.preferredTime || '—'}</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Property -->
+      <div style="padding:24px 32px;border-bottom:1px solid #e2e8f0">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin-bottom:12px">Property</div>
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px;width:120px">Address</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.address || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">City</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.city || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">ZIP</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.zip || '—'}</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Estimate -->
+      <div style="padding:24px 32px;border-bottom:1px solid #e2e8f0">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin-bottom:12px">Preliminary Estimate</div>
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px;width:160px">Roof area (est.)</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.estimatedRoofArea ? body.estimatedRoofArea.toLocaleString() + ' sq ft' : '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Treatment range</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.estimatedTreatmentRange || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Replacement range</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.estimatedReplacementRange || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Potential savings</td>
+            <td style="padding:6px 0;font-weight:700;font-size:14px;color:#166534">${body.potentialSavings || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Qualification score</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.qualificationScore ?? '—'} / 100</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Roof Details -->
+      <div style="padding:24px 32px;border-bottom:1px solid #e2e8f0">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin-bottom:12px">Roof Details</div>
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px;width:160px">Age</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.roofAge || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Condition</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.roofCondition || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Pitch</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.roofPitch || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Style</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.roofStyle || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Sections</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.roofSections || '—'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Features</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.roofFeatures || 'none'}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#64748b;font-size:13px">Known issues</td>
+            <td style="padding:6px 0;font-weight:600;font-size:14px">${body.knownIssues || '—'}</td>
+          </tr>
+        </table>
+      </div>
+
+      ${body.notes ? `
+      <!-- Customer Notes -->
+      <div style="padding:24px 32px;border-bottom:1px solid #e2e8f0">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin-bottom:12px">Customer Notes</div>
+        <div style="font-size:14px;color:#0f172a;line-height:1.6;background:#f5f7fa;border-radius:10px;padding:14px 16px">${body.notes}</div>
+      </div>` : ''}
+
+      <!-- Footer -->
+      <div style="padding:20px 32px;background:#f5f7fa;text-align:center">
+        <div style="font-size:12px;color:#94a3b8">Lead ID: ${newId || '—'} &nbsp;·&nbsp; Roof and Fence Rejuvenation CRM</div>
+      </div>
+
+    </div>
+  `;
+}
+
+// ── Customer confirmation email ──────────────────────────────
+function buildCustomerEmail(name) {
+  const firstName = (name || '').split(' ')[0] || 'there';
+  return `
+    <div style="font-family:Inter,ui-sans-serif,system-ui,sans-serif;max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
+
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#0b1f3a,#132f55);padding:32px;color:#fff;text-align:center">
+        <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:rgba(255,255,255,.6);margin-bottom:10px">Roof &amp; Fence Rejuvenation</div>
+        <div style="font-size:28px;font-weight:900;letter-spacing:-.03em;line-height:1.1">We received your<br>roof information.</div>
+      </div>
+
+      <!-- Body -->
+      <div style="padding:32px">
+        <p style="font-size:16px;color:#0f172a;margin:0 0 18px">Hi ${firstName},</p>
+        <p style="font-size:15px;color:#334155;line-height:1.7;margin:0 0 18px">
+          Thank you — your preliminary roof information has been received. A member of our team will review your details and reach out within 1 business day. Not every roof qualifies for rejuvenation, and we'll give you a clear recommendation either way.
+        </p>
+        <div style="background:#f5f7fa;border-left:4px solid #c62828;border-radius:0 10px 10px 0;padding:16px 18px;margin:24px 0">
+          <div style="font-size:13px;font-weight:700;color:#0b1f3a;margin-bottom:4px">What happens next</div>
+          <div style="font-size:14px;color:#475569;line-height:1.6">We'll review your roof details, confirm whether rejuvenation is a practical option for your property, and follow up with a specific recommendation.</div>
+        </div>
+        <p style="font-size:14px;color:#64748b;margin:0">Questions in the meantime? Reply to this email or call us directly.</p>
+      </div>
+
+      <!-- Footer -->
+      <div style="padding:20px 32px;background:#f5f7fa;text-align:center;border-top:1px solid #e2e8f0">
+        <div style="font-size:12px;color:#94a3b8">Roof and Fence Rejuvenation &nbsp;·&nbsp; roofandfencerejuvenation.com</div>
+      </div>
+
+    </div>
+  `;
+}
+
+// ── Main handler ─────────────────────────────────────────────
 module.exports = async function handler(req, res) {
+
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
-    console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_KEY');
     return res.status(500).json({ error: 'Server not configured' });
   }
 
@@ -154,79 +220,85 @@ module.exports = async function handler(req, res) {
     const supabase = createClient(supabaseUrl, supabaseKey);
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
 
-    if (body.company) {
-      console.log('Spam submission blocked');
-      return res.status(200).json({ success: true });
-    }
+    if (body.company) return res.status(200).json({ success: true });
 
     const lead = {
-      name:                    body.name || null,
-      phone:                   body.phone || null,
-      email:                   body.email || null,
-      preferred_time:          body.preferredTime || null,
-      notes:                   body.notes || null,
-      address:                 body.address || null,
-      zip:                     body.zip || null,
-      in_service_area:         body.inServiceArea ?? null,
+      name:                    body.name              || null,
+      phone:                   body.phone             || null,
+      email:                   body.email             || null,
+      preferred_time:          body.preferredTime     || null,
+      notes:                   body.notes             || null,
+      address:                 body.address           || null,
+      city:                    body.city              || null,
+      zip:                     body.zip               || null,
       normalized_address:      body.normalizedAddress || null,
-      property_lat:            body.propertyLat ?? null,
-      property_lng:            body.propertyLng ?? null,
+      property_lat:            body.propertyLat       ?? null,
+      property_lng:            body.propertyLng       ?? null,
       building_footprint_sqft: body.buildingFootprintSqft ?? null,
       property_data_source:    body.propertyDataSource || 'manual',
-      home_sqft:               body.homeSqft || null,
-      stories:                 body.stories || null,
-      roof_age:                body.roofAge || null,
-      roof_condition:          body.roofCondition || null,
-      roof_pitch:              body.roofPitch || null,
-      roof_complexity:         body.roofComplexity || null,
-      roof_style:              body.roofStyle || null,
-      roof_sections:           body.roofSections || null,
-      roof_features:           body.roofFeatures || null,
-      replacement_quote:       body.replacementQuote || null,
-      known_issues:            body.knownIssues || null,
+      home_sqft:               body.homeSqft          || null,
+      stories:                 body.stories           || null,
+      roof_age:                body.roofAge           || null,
+      roof_condition:          body.roofCondition     || null,
+      roof_pitch:              body.roofPitch         || null,
+      roof_style:              body.roofStyle         || null,
+      roof_sections:           body.roofSections      || null,
+      roof_features:           body.roofFeatures      || null,
+      replacement_quote:       body.replacementQuote  || null,
+      known_issues:            body.knownIssues       || null,
       estimated_roof_area:     body.estimatedRoofArea || null,
-      treatment_range:         body.estimatedTreatmentRange || null,
+      treatment_range:         body.estimatedTreatmentRange   || null,
       replacement_range:       body.estimatedReplacementRange || null,
-      potential_savings:       body.potentialSavings || null,
+      potential_savings:       body.potentialSavings  || null,
       qualification_score:     body.qualificationScore || null,
-      hard_stop_reason:        body.hardStopReason || null,
-      lead_priority:           body.leadPriority || null,
-      minimum_project_price:   body.minimumProjectPrice || null,
-      base_rate_per_roof_sqft: body.baseRatePerRoofSqft || null,
-      utm_source:              body.utmSource || null,
-      utm_medium:              body.utmMedium || null,
-      utm_campaign:            body.utmCampaign || null,
-      utm_term:                body.utmTerm || null,
-      utm_content:             body.utmContent || null,
-      source_page:             body.sourcePage || null,
-      user_agent:              body.userAgent || null,
-      lead_source:             body.leadSource || 'Roof Rejuvenation Estimator',
-      business_email:          body.businessEmail || null,
+      lead_priority:           body.leadPriority      || null,
+      utm_source:              body.utmSource         || null,
+      utm_medium:              body.utmMedium         || null,
+      utm_campaign:            body.utmCampaign       || null,
+      source_page:             body.sourcePage        || null,
+      lead_source:             body.leadSource        || 'Roof Rejuvenation Estimator',
       status:                  'new'
     };
 
-    const { data, error } = await supabase
-      .from('leads')
-      .insert(lead)
-      .select('id');
+    const { data, error } = await supabase.from('leads').insert(lead).select('id');
 
     if (error) {
-      console.error('Supabase insert error:', error);
+      console.error('Supabase error:', error);
       return res.status(500).json({ error: error.message });
     }
 
     const newId = data?.[0]?.id;
-    console.log('Lead saved successfully:', newId, '| Priority:', lead.lead_priority, '| Score:', lead.qualification_score);
+    console.log('Lead saved successfully:', newId);
 
-    try {
-      await sendLeadEmail(body, lead, newId);
-    } catch (mailErr) {
-      console.error('Email notification failed:', mailErr.message);
+    // ── Send emails (non-blocking — lead is already saved) ──
+    const emailPromises = [];
+
+    // 1. Internal alert to Ray
+    emailPromises.push(
+      sendEmail({
+        to:      'ray@roofandfencerejuvenation.com',
+        subject: `New ${body.leadPriority || 'lead'} — ${body.name || 'Unknown'} · ${body.city || body.zip || 'No location'}`,
+        html:    buildInternalEmail(body, lead, newId)
+      })
+    );
+
+    // 2. Customer confirmation (only if they gave an email)
+    if (body.email) {
+      emailPromises.push(
+        sendEmail({
+          to:      body.email,
+          subject: 'We received your roof information — Roof and Fence Rejuvenation',
+          html:    buildCustomerEmail(body.name)
+        })
+      );
     }
 
+    await Promise.allSettled(emailPromises);
+
     return res.status(200).json({ success: true, id: newId });
+
   } catch (err) {
-    console.error('Unexpected error in webhook handler:', err);
+    console.error('Unexpected error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 };
