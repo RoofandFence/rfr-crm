@@ -1,7 +1,10 @@
 {
-  "version": 2,
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/:path*" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  "name": "rfr-crm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Roof & Fence Rejuvenation CRM — Lead Pipeline",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "nodemailer": "^6.9.0"
+  }
 }
